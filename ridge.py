@@ -1,0 +1,412 @@
+import argparse
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.autograd as autograd
+import torch.optim as optim
+from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
+from torch.utils.data import DataLoader, TensorDataset, random_split
+from torchvision import datasets, transforms
+from RFLAF_model import WRFLAF, RidgeRegressionRegularizer, LeverageScore, leverage_weighed_sampling, RFLAF_BSpline
+from BaseRF_model import RFMLP
+# from efficient_kan import KAN
+import os
+from tqdm import tqdm
+import time
+from load_more_data import get_uci_loaders
+
+def load_data(data, batch_size):
+    seed = 0
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    
+    if data in ['sin', 'tru', 'zoi']:
+        task_name = data
+        X = np.load(f'./data/X_{task_name}.npy') 
+        y = np.load(f'./data/y_{task_name}.npy') 
+        X = torch.tensor(X)
+        y = torch.tensor(y)
+
+        dataset = TensorDataset(X, y)
+
+        test_size = int(0.2 * len(dataset))
+        train_size = len(dataset) - test_size
+        train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+
+    elif data=='mnist':
+        # 1,28,28
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.0,), (45.0,))])
+        train_dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+        test_dataset = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+        
+    elif data=='cifar10':
+        # 3,32,32
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (65.0, 65.0, 65.0))])
+        train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+        test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+        # classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+
+    else:
+        # data = 'adult', 'protein', 'ct', 'workloads'
+        X, y = get_uci_loaders(data)
+        if data=='adult':
+            dataset = TensorDataset(torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.long))
+        else:
+            dataset = TensorDataset(torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32))
+        test_size = int(0.2 * len(dataset))
+        train_size = len(dataset) - test_size
+        train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+    
+    print(f"Use datasets: {data}\ntrain size: {len(train_dataset)}\ntest size: {len(test_dataset)}")
+    
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    
+    return train_loader, test_loader, train_dataset, test_dataset
+
+def sample_matrix(data):
+    if data in ['adult', 'protein', 'ct', 'workloads']:
+        train_loader, test_loader, train_dataset, test_dataset = load_data(data, 128)
+        return np.array([item[0].numpy() for item in train_dataset])
+    elif data in ['cifar10']:
+        train_loader, test_loader, train_dataset, test_dataset = load_data(data, 128)
+        return np.array([item.reshape(-1) for item in train_dataset.data])
+
+def find_dim(data):
+    classification = False
+    if data in ['sin', 'tru', 'zoi']:
+        input_dim = 2
+        hidden_dim = newM
+        output_dim = 1
+        criterion = nn.MSELoss()
+    elif data=='mnist':
+        input_dim = 28 * 28
+        hidden_dim = newM
+        output_dim = 10
+        criterion = nn.CrossEntropyLoss()
+        classification = True
+    elif data=='cifar10':
+        input_dim = 3 * 32 * 32
+        hidden_dim = newM
+        output_dim = 10
+        criterion = nn.CrossEntropyLoss()
+        classification = True
+    elif data=='adult':
+        input_dim = 100
+        hidden_dim = newM
+        output_dim = 2
+        criterion = nn.CrossEntropyLoss()
+        classification = True
+    elif data=='protein':
+        input_dim = 9
+        hidden_dim = newM
+        output_dim = 1
+        criterion = nn.MSELoss()
+    elif data=='ct':
+        input_dim = 384
+        hidden_dim = newM
+        output_dim = 1
+        criterion = nn.MSELoss()
+    elif data=='workloads':
+        input_dim = 6
+        hidden_dim = newM
+        output_dim = 1
+        criterion = nn.MSELoss()
+    elif data=='msd':
+        input_dim = 89
+        hidden_dim = newM
+        output_dim = 1
+        criterion = nn.MSELoss()
+    else:
+        pass
+    print(f"Data dimension: {input_dim}")
+    return input_dim, hidden_dim, output_dim, criterion, classification
+
+def find_args(data, model, propty, seed, M, N=17, L=-2, R=2, lambda1=1, lambda2=0):
+    h = 4/(N-1)
+    if model=='RFLAF':
+        actfunc = 'LAF'
+        moreargs=f'h={h}_N={N}_L={L}_R={R}_M={M}_lambda1={lambda1}_lambda2={lambda2}'
+    elif model=='RFLAFBS':
+        actfunc = 'BS'
+        moreargs=f'N={N}_L={L}_R={R}_M={M}_lambda1={lambda1}_lambda2={lambda2}'
+    elif model=='RFMLP':
+        actfunc = 'relu'
+        moreargs=f'M={M}'
+    
+    if data in ['ct', 'protein', 'workloads']:
+        epochs = 20
+    elif data in ['adult', 'cifar10']:
+        epochs = 10
+    
+    foldername={
+        'test_loss': 'losses',
+        'train_loss': 'losses',
+        'test_acc': 'accuracies',
+        'train_acc': 'accuracies',
+        'test_time': 'times',
+        'train_time': 'times',
+        'coef': 'coef',
+        'features': 'features',
+    }
+    if propty=='coef':
+        return f"./{foldername[propty]}/{data}_{actfunc}_{propty}_seed={seed}_epoch={epochs}_{moreargs}_{epochs}.txt"
+    else:
+        return f"./{foldername[propty]}/{data}_{actfunc}_{propty}_seed={seed}_epoch={epochs}_{moreargs}.txt"
+
+def find_moreargs(model):
+    if model=='RFLAF':
+        actfunc = 'LAF'
+        moreargs=f'_h={args.h}_N={args.N}_L={args.L}_R={args.R}_s={newM}_M={args.M}_lambda1={args.lambda1}_lambda2={args.lambda2}'
+    elif model=='RFLAFBS':
+        actfunc = 'BS'
+        moreargs=f'_N={args.N}_L={args.L}_R={args.R}_s={newM}_M={args.M}_lambda1={args.lambda1}_lambda2={args.lambda2}'
+    elif model=='RFMLP':
+        actfunc = args.actfunc
+        moreargs=f'_s={newM}_M={args.M}'
+    # elif model=='RFLAFPL':
+    #     actfunc = 'PL'
+    #     moreargs=f'_N={args.N}_M={args.M}_lambda1={args.lambda1}_lambda2={args.lambda2}'
+    # elif model=='MLP':
+    #     actfunc = 'N'+args.actfunc
+    #     moreargs=f'_M={args.M}'
+    # elif model=='LAN':
+    #     actfunc = 'LAN'
+    #     moreargs=f'_h={args.h}_N={args.N}_L={args.L}_R={args.R}_M={args.M}_lambda1={args.lambda1}_lambda2={args.lambda2}'
+    # elif model=='LANBS':
+    #     actfunc = 'LANBS'
+    #     moreargs=f'_N={args.N}_L={args.L}_R={args.R}_M={args.M}_lambda1={args.lambda1}_lambda2={args.lambda2}'
+    # elif model=='LANPL':
+    #     actfunc = 'LANPL'
+    #     moreargs=f'_N={args.N}_M={args.M}_lambda1={args.lambda1}_lambda2={args.lambda2}'
+    # elif model=='KAN':
+    #     actfunc = 'KAN'
+    #     moreargs=f'_N={args.N}_L={args.L}_R={args.R}_M={args.M}'   
+    return actfunc, moreargs
+
+def find_model():
+    h, N, L, R, model, regularizer = None, None, None, None, None, None
+    if args.model=='RFLAF':
+        # Setting parameters
+        print(f'Using model RFLAF, modelseed={modelseed}')
+        h, N, L, R = args.h, args.N, args.L, args.R
+        print(f'RBF params:\th={h}\tN={N}\tL={L}\tR={R}')
+        model = WRFLAF(newfeatures, Qlist, coef, output_dim, h=4/(N-1), N=N, seed=modelseed).to(device)
+        regularizer = RidgeRegressionRegularizer(lambda0, newM)
+    # elif args.model=='RFLAFBS':
+    #     # Setting parameters
+    #     print(f'Using model RFLAF_BSpline, modelseed={modelseed}')
+    #     N, L, R = args.N, args.L, args.R
+    #     h = (R-L)/(N-1)
+    #     print(f'BSpline params:\th={h}\tN={N}\tL={L}\tR={R}')
+    #     model = RFLAF_BSpline(input_dim, hidden_dim, output_dim, N, L, R, modelseed).to(device)
+    #     regularizer = CustomRegularizer(args.lambda1, args.lambda2, args.N, args.M)
+    # elif args.model=='RFMLP':
+    #     print(f'Using model RFMLP, modelseed={modelseed}')
+    #     model = RFMLP(input_dim, hidden_dim, output_dim, args.actfunc, args.modelseed).to(device)
+    
+    # elif args.model=='RFLAFPL':
+    #     print(f'Using model RFLAF_Poly, modelseed={modelseed}')
+    #     N = args.N
+    #     print(f'Poly params:\tN={N}')
+    #     model = RFLAF_Poly(input_dim, hidden_dim, output_dim, N, modelseed).to(device)
+    #     regularizer = CustomRegularizer(args.lambda1, args.lambda2, args.N, args.M)
+    # elif args.model=='MLP':
+    #     print(f'Using model MLP, modelseed={modelseed}')
+    #     model = RFMLP(input_dim, hidden_dim, output_dim, args.actfunc, args.modelseed, frozen=False).to(device)
+    # elif args.model=='LAN':
+    #     print(f'Using model LAN, modelseed={modelseed}')
+    #     h, N, L, R = args.h, args.N, args.L, args.R
+    #     print(f'RBF params:\th={h}\tN={N}\tL={L}\tR={R}')
+    #     model = RFLAF(input_dim, hidden_dim, output_dim, h, N, L, R, modelseed, frozen=False).to(device)
+    #     regularizer = CustomRegularizer(args.lambda1, args.lambda2, args.N, args.M)
+    # elif args.model=='LANBS':
+    #     print(f'Using model RFLAF_BSpline, modelseed={modelseed}')
+    #     N, L, R = args.N, args.L, args.R
+    #     h = (R-L)/(N-1)
+    #     print(f'BSpline params:\th={h}\tN={N}\tL={L}\tR={R}')
+    #     model = RFLAF_BSpline(input_dim, hidden_dim, output_dim, N, L, R, modelseed, frozen=False).to(device)
+    #     regularizer = CustomRegularizer(args.lambda1, args.lambda2, args.N, args.M)
+    # elif args.model=='LANPL':
+    #     print(f'Using model RFLAF_Poly, modelseed={modelseed}')
+    #     N = args.N
+    #     print(f'Poly params:\tN={N}')
+    #     model = RFLAF_Poly(input_dim, hidden_dim, output_dim, N, modelseed, frozen=False).to(device)
+    #     regularizer = CustomRegularizer(args.lambda1, args.lambda2, args.N, args.M)
+    # elif args.model=='KAN':
+    #     print(f'Using model KAN, modelseed={modelseed}')
+    #     N, L, R = args.N, args.L, args.R
+    #     print(f'KAN params:\tN={args.N}\tL={args.L}\tR={args.R}')
+    #     model = KAN([input_dim, max(hidden_dim//args.N, 10), output_dim], grid_size=args.N, spline_order=3, grid_range=[args.L, args.R]).to(device)
+    return h, N, L, R, model, regularizer
+
+
+def train():
+    train_losses, test_losses, train_accuracies, test_accuracies = [], [], [], []
+    train_time, test_time = [], []
+    for epoch in range(epochs):
+        time1 = time.time()
+        iter=0
+        total_loss, correct = 0, 0
+        model.train()
+        for images, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} - Training", leave=False):
+            iter+=1
+            images, labels = images.view(-1, input_dim).to(device), labels.to(device)
+            
+            outputs = model(images)
+            if args.model in ['RFLAF', 'RFLAFBS', 'RFLAFPL', 'LAN', 'LANBS', 'LANPL']:
+                reg_value = regularizer(model.v)
+            else:
+                reg_value = torch.tensor(0.0, requires_grad=False)
+            loss = criterion(outputs, labels) + reg_value
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item() - reg_value.item()
+            if classification:
+                _, preds = torch.max(outputs, 1)
+                correct += (preds == labels).sum().item()
+        
+        train_losses.append(total_loss / len(train_loader))
+        if classification:
+            train_accuracies.append(correct / len(train_dataset))
+        time2 = time.time()
+        train_time.append(time2-time1)
+
+        time1 = time.time()
+        total_loss, correct = 0, 0
+        model.eval()
+        with torch.no_grad():
+            for images, labels in tqdm(test_loader, desc=f"Epoch {epoch+1}/{epochs} - Validation", leave=False):
+                images, labels = images.view(-1, input_dim).to(device), labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                
+                total_loss += loss.item()
+                if classification:
+                    _, preds = torch.max(outputs, 1)
+                    correct += (preds == labels).sum().item()
+        
+        test_losses.append(total_loss / len(test_loader))
+        if classification:
+            test_accuracies.append(correct / len(test_dataset))
+        time2 = time.time()
+        test_time.append(time2-time1)
+        
+        if args.model in ['RFLAF', 'LAN', 'RFLAFBS', 'RFLAFPL', 'LANBS', 'LANPL']:
+            os.makedirs('./ridge/coef', exist_ok=True)
+            coef = model.a.cpu().detach().numpy()
+            np.savetxt(f"./ridge/coef/{task_name}_coef_{moreargs}_{epoch+1}.txt", coef)
+        
+        if classification:
+            print(f"Epoch {epoch+1}/{epochs}, Train Loss: {train_losses[-1]:.4f}, Test Loss: {test_losses[-1]:.4f}| "
+                f"Train Accuracy: {train_accuracies[-1]:.4f}, Test Accuracy: {test_accuracies[-1]:.4f}")
+        else:
+            print(f"Epoch {epoch+1}/{epochs}, Train Loss: {train_losses[-1]:.4f}, Test Loss: {test_losses[-1]:.4f}")
+    
+    return train_losses, test_losses, train_accuracies, test_accuracies, train_time, test_time
+
+def save_losses():
+    if classification:
+        os.makedirs('./ridge/accuracies', exist_ok=True)
+        np.savetxt(f"./ridge/accuracies/{task_name}_train_acc_{moreargs}.txt", train_accuracies)
+        np.savetxt(f"./ridge/accuracies/{task_name}_test_acc_{moreargs}.txt", test_accuracies)
+    
+    os.makedirs('./ridge/losses', exist_ok=True)
+    np.savetxt(f"./ridge/losses/{task_name}_train_loss_{moreargs}.txt", train_losses)
+    np.savetxt(f"./ridge/losses/{task_name}_test_loss_{moreargs}.txt", test_losses)
+    
+    os.makedirs('./ridge/times', exist_ok=True)
+    np.savetxt(f"./ridge/times/{task_name}_train_time_{moreargs}.txt", train_time)
+    np.savetxt(f"./ridge/times/{task_name}_test_time_{moreargs}.txt", test_time)
+
+
+if __name__=='__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, default='RFLAF')
+    parser.add_argument('--data', type=str, default='mnist')
+    parser.add_argument('--epochs', type=int, default=25)
+    parser.add_argument('--M', type=int, default=1000)
+    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--h', type=float, default=0.02)
+    parser.add_argument('--N', type=int, default=401)
+    parser.add_argument('--L', type=float, default=-2)
+    parser.add_argument('--R', type=float, default=2)
+    parser.add_argument('--lambda1', type=float, default=1)
+    parser.add_argument('--lambda2', type=float, default=0)
+    parser.add_argument('--actfunc', type=str, default='relu')
+    parser.add_argument('--modelseed', type=int, default=402025)
+    parser.add_argument('--batch_size', type=int, default=128)
+    args=parser.parse_args()
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    if device==torch.device("cuda"):
+        print(f"GPU: {os.environ["CUDA_VISIBLE_DEVICES"]}")
+    
+    # Levarge weighted sampling
+    print("Loading weight matrix...")
+    features = np.loadtxt(find_args(args.data, args.model, 'features', args.modelseed, args.M, args.N))
+    coef = np.loadtxt(find_args(args.data, args.model, 'coef', args.modelseed, args.M, args.N))
+    X = sample_matrix(args.data)
+    lambda0 = 1/np.sqrt(X.shape[0])
+    
+    print(f'Calculating leverage scores...')
+    LSF = LeverageScore(coef, features, 4/(args.N-1), args.N, seed=args.modelseed)
+    q_list, effd = LSF(torch.tensor(X, dtype=torch.float64), lambda0)
+    print(f'Dataset: {args.data}, effective dimension={effd:.2f}')
+    
+    M_list = [10, 30, 50, 100, 300, 500, 1000, 3000, 5000]
+    for newM in M_list:
+        if newM > args.M:
+            break
+        print(f"Weighet sampling RF number: 【{newM=}】")
+        idx = leverage_weighed_sampling(q_list, newM)
+        newfeatures = features[:,idx]
+        Qlist = np.sqrt(1/q_list[idx])
+        
+        # Loading data
+        print(f'Loading data {args.data}')
+        input_dim, hidden_dim, output_dim, criterion, classification = find_dim(args.data)
+        train_loader, test_loader, train_dataset, test_dataset = load_data(args.data, args.batch_size)
+        print(f'Finished loading data {args.data}')
+        
+        # Setting RFLAF model
+        modelseed = args.modelseed
+        h, N, L, R, model, regularizer = find_model()
+        
+        # Setting logger file name
+        actfunc, moreargs = find_moreargs(args.model)
+        moreargs=f'seed={modelseed}_epoch={args.epochs}{moreargs}'
+        task_name = args.data + '_' + actfunc # taskname = 'dataset_modelname'
+        
+        os.makedirs('./ridge', exist_ok=True)
+        os.makedirs('./ridge/features', exist_ok=True)
+        np.savetxt(f"./ridge/features/{task_name}_features_{moreargs}.txt", model.W.cpu().detach().numpy())
+        
+        optimizer = optim.SGD(model.parameters(), lr=args.lr)
+        if newM >= 1000:
+            optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+        if args.data in ['protein', 'ct', 'workloads']:
+            optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+        if args.model=='RFLAFBS':
+            optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+        epochs = args.epochs
+        
+        print(f'Start training model {args.model} on data {args.data}...')
+        start_time = time.time()
+        train_losses, test_losses, train_accuracies, test_accuracies, train_time, test_time = train()
+        end_time = time.time()
+        print(f'Finished in {end_time-start_time:.2f}s')
+        
+        os.makedirs('./ridge/times', exist_ok=True)
+        np.savetxt(f"./ridge/times/{task_name}_time_{moreargs}.txt", [end_time-start_time])
+        
+        print(f'Saving losses...')
+        save_losses()
+        print(f'Finished saving losses')
+    
+    
