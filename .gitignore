@@ -9,3 +9,4 @@ run.ipynb
 runrbf.sh
 runrelu.sh
 features
+.gitignore
