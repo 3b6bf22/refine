@@ -383,7 +383,7 @@ if __name__=='__main__':
         moreargs=f'seed={modelseed}_epoch={args.epochs}{moreargs}'
         task_name = args.data + '_' + actfunc # taskname = 'dataset_modelname'
         
-        # os.makedirs('./ridge', exist_ok=True)
+        os.makedirs('./ridge', exist_ok=True)
         # os.makedirs('./ridge/features', exist_ok=True)
         # np.savetxt(f"./ridge/features/{task_name}_features_{moreargs}.txt", model.W.cpu().detach().numpy())
         

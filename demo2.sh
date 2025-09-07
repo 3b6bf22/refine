@@ -2,7 +2,7 @@ modelseed_list=(402025 102025 202025 302025 3070 4080 5090 20250101)
 M_list=(10 30 50 100 300 500 1000 3000 5000)
 data_list=('adult' 'cifar10' 'protein' 'workloads')
 epoch_list=(10 10 20 20)
-bigm_list=(5000 5000 5000 1000)
+bigm_list=(5000 1000 5000 1000)
 
 for ((j=0; j<${#data_list[@]}; j++)); do
     data=${data_list[$j]}
