@@ -4,3 +4,37 @@ Data adult Modelseed  N  M 50 completed in 31 seconds.
 Data adult Modelseed  N  M 100 completed in 31 seconds.
 Data adult Modelseed  N  M 300 completed in 31 seconds.
 Data adult Modelseed  N  M 500 completed in 32 seconds.
+Data adult Modelseed  N  M 1000 completed in 33 seconds.
+Data adult Modelseed  N  M 3000 completed in 52 seconds.
+Data adult Modelseed  N  M 5000 completed in 71 seconds.
+Data adult ridge Modelseed  N  M 5000 completed in 554 seconds.
+Data cifar10 Modelseed  N  M 10 completed in 158 seconds.
+Data cifar10 Modelseed  N  M 30 completed in 148 seconds.
+Data cifar10 Modelseed  N  M 50 completed in 148 seconds.
+Data cifar10 Modelseed  N  M 100 completed in 152 seconds.
+Data cifar10 Modelseed  N  M 300 completed in 150 seconds.
+Data cifar10 Modelseed  N  M 500 completed in 154 seconds.
+Data cifar10 Modelseed  N  M 1000 completed in 162 seconds.
+Data cifar10 Modelseed  N  M 3000 completed in 191 seconds.
+Data cifar10 Modelseed  N  M 5000 completed in 225 seconds.
+Data cifar10 ridge Modelseed  N  M 5000 completed in 1899 seconds.
+Data protein Modelseed  N  M 10 completed in 79 seconds.
+Data protein Modelseed  N  M 30 completed in 76 seconds.
+Data protein Modelseed  N  M 50 completed in 76 seconds.
+Data protein Modelseed  N  M 100 completed in 77 seconds.
+Data protein Modelseed  N  M 300 completed in 78 seconds.
+Data protein Modelseed  N  M 500 completed in 78 seconds.
+Data protein Modelseed  N  M 1000 completed in 80 seconds.
+Data protein Modelseed  N  M 3000 completed in 131 seconds.
+Data protein Modelseed  N  M 5000 completed in 182 seconds.
+Data protein ridge Modelseed  N  M 5000 completed in 1120 seconds.
+Data workloads Modelseed  N  M 10 completed in 263 seconds.
+Data workloads Modelseed  N  M 30 completed in 265 seconds.
+Data workloads Modelseed  N  M 50 completed in 268 seconds.
+Data workloads Modelseed  N  M 100 completed in 263 seconds.
+Data workloads Modelseed  N  M 300 completed in 262 seconds.
+Data workloads Modelseed  N  M 500 completed in 263 seconds.
+Data workloads Modelseed  N  M 1000 completed in 304 seconds.
+Data workloads Modelseed  N  M 3000 completed in 526 seconds.
+Data workloads Modelseed  N  M 5000 completed in 761 seconds.
+Data workloads ridge Modelseed  N  M 5000 completed in 2218 seconds.
