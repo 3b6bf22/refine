@@ -328,6 +328,8 @@ if __name__=='__main__':
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
     if args.model=='RFLAFBS' and args.data in ['protein', 'workloads'] and args.M > 1000:
         optimizer=optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+    if args.model=='RFLAFBS' and args.data in ['protein', 'workloads'] and args.N==65:
+        optimizer=optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
     epochs = args.epochs
     
     print(f'Start training model {args.model} on data {args.data}...')

@@ -22,3 +22,15 @@ runrbf.sh
 runrelu.sh
 features
 .gitignore
+workloads.sh
+workloads.txt
+workloads.log
+demo17bs.sh
+demo17bs.log
+demo17bs.txt
+demo33bs.sh
+demo33bs.log
+demo33bs.txt
+demo65bs.sh
+demo65bs.log
+demo65bs.txt

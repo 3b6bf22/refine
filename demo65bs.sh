@@ -4,7 +4,7 @@ data_list=('adult' 'cifar10' 'protein' 'workloads')
 epoch_list=(10 10 20 20)
 bigm_list=(5000 3000 5000 1000)
 
-for ((j=0; j<${#data_list[@]}; j++)); do
+for ((j=2; j<${#data_list[@]}; j++)); do
     data=${data_list[$j]}
     epoch=${epoch_list[$j]}
     bigm=${bigm_list[$j]}
