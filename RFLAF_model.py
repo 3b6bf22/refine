@@ -108,21 +108,27 @@ class RidgeRegressionRegularizer(nn.Module):
         return reg_term
 
 class LeverageScore(nn.Module):
-    def __init__(self, coef, features, h=0.02, N=401, seed=0, L=-2, R=2):
+    def __init__(self, coef, features, h=0.02, N=401, seed=0, L=-2, R=2, basis='RFLAF'):
         super(LeverageScore, self).__init__()
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         
-        hlist=h * np.ones(N)
-        clist=np.linspace(L, R, N)
-        paralist = list(zip(clist, hlist))
-        
         self.W = nn.Parameter(torch.tensor(features), requires_grad=False)
         print('weight matrix size [d, M]:', tuple(self.W.shape))
         self.a = nn.Parameter(torch.tensor(coef))
         print('coef size: [N]', tuple(self.a.shape)[0])
-        self.rbfs = nn.ModuleList([RBFLayer(torch.tensor(center), torch.tensor(gamma)) for center, gamma in paralist])
+        
+        if basis=='RFLAF':
+            hlist=h * np.ones(N)
+            clist=np.linspace(L, R, N)
+            paralist = list(zip(clist, hlist))
+            self.rbfs = nn.ModuleList([RBFLayer(torch.tensor(center), torch.tensor(gamma)) for center, gamma in paralist])
+        elif basis=='RFLAFBS':
+            hlist=(R-L)/(1.0*(N-1)) * np.ones(N)
+            clist=np.linspace(L, R, N)
+            paralist = list(zip(clist, hlist))
+            self.rbfs = nn.ModuleList([BSplineLayer(torch.tensor(center), torch.tensor(gamma)) for center, gamma in paralist])
 
     def forward(self, x, lambda0):
         # Input x: [n, input_dim]
@@ -216,6 +222,44 @@ class RFLAF_BSpline(nn.Module):
         A = torch.stack([rbf(xW) for rbf in self.rbfs], dim=2) # [batch_size, M, N]
         Aa = torch.matmul(A, self.a) # [batch_size, M]
         vAa = torch.matmul(Aa, self.v) # [batch_size]
+        return vAa
+    
+class WRFLAF_BSpline(nn.Module):
+    def __init__(self, features, Q, coef, output_dim=1, N=401, L=-2, R=2, seed=0):
+        super(WRFLAF_BSpline, self).__init__()
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        
+        hlist=(R-L)/(1.0*(N-1)) * np.ones(N)
+        clist=np.linspace(L, R, N)
+        paralist = list(zip(clist, hlist))
+        
+        input_dim, hidden_dim = features.shape
+        
+        self.W = nn.Parameter(torch.tensor(features, dtype=torch.float32), requires_grad=False)
+        print('weight matrix size [d, M]:', tuple(self.W.shape))
+        
+        self.a = nn.Parameter(torch.tensor(coef, dtype=torch.float32))
+        print('coef size: [N]', tuple(self.a.shape)[0])
+        
+        if output_dim==1:
+            self.v = nn.Parameter(torch.randn(hidden_dim)/torch.sqrt(torch.tensor(hidden_dim*1.0)))
+        else:
+            self.v = nn.Parameter(torch.randn(hidden_dim, output_dim)/torch.sqrt(torch.tensor(hidden_dim*1.0)))
+              
+        self.Q = nn.Parameter(torch.tensor(Q, dtype=torch.float32), requires_grad=False)
+        
+        self.rbfs = nn.ModuleList([BSplineLayer(torch.tensor(center), torch.tensor(gamma)) for center, gamma in paralist])
+
+    def forward(self, x):
+        # x: [batch_size, input_dim]
+        x = x.view(x.size(0), -1)  # Flatten input
+        xW = torch.matmul(x, self.W)  # [batch_size, M]
+        A = torch.stack([rbf(xW) for rbf in self.rbfs], dim=2) # [batch_size, M, N]
+        Aa = torch.matmul(A, self.a) # [batch_size, M]
+        AaQ = Aa * self.Q  # [batch_size, M]
+        vAa = torch.matmul(AaQ, self.v) # [batch_size]
         return vAa
     
 # For polynomials as base functions:

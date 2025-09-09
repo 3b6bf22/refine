@@ -325,8 +325,9 @@ if __name__=='__main__':
     os.makedirs('./features', exist_ok=True)
     np.savetxt(f"./features/{task_name}_features_{moreargs}.txt", model.W.cpu().detach().numpy())
     
-    optimizer = optim.SGD(model.parameters(), lr=args.lr)  
-    # optimizer=optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr)
+    if args.model=='RFLAFBS' and args.data in ['protein', 'workloads'] and args.M > 1000:
+        optimizer=optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
     epochs = args.epochs
     
     print(f'Start training model {args.model} on data {args.data}...')

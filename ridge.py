@@ -7,7 +7,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from torchvision import datasets, transforms
-from RFLAF_model import WRFLAF, RidgeRegressionRegularizer, LeverageScore, leverage_weighed_sampling, RFLAF_BSpline
+from RFLAF_model import WRFLAF, RidgeRegressionRegularizer, LeverageScore, leverage_weighed_sampling, WRFLAF_BSpline
 from BaseRF_model import RFMLP
 # from efficient_kan import KAN
 import os
@@ -194,14 +194,14 @@ def find_model():
         print(f'RBF params:\th={h}\tN={N}\tL={L}\tR={R}')
         model = WRFLAF(newfeatures, Qlist, coef, output_dim, h=4/(N-1), N=N, seed=modelseed).to(device)
         regularizer = RidgeRegressionRegularizer(lambda0, newM)
-    # elif args.model=='RFLAFBS':
-    #     # Setting parameters
-    #     print(f'Using model RFLAF_BSpline, modelseed={modelseed}')
-    #     N, L, R = args.N, args.L, args.R
-    #     h = (R-L)/(N-1)
-    #     print(f'BSpline params:\th={h}\tN={N}\tL={L}\tR={R}')
-    #     model = RFLAF_BSpline(input_dim, hidden_dim, output_dim, N, L, R, modelseed).to(device)
-    #     regularizer = CustomRegularizer(args.lambda1, args.lambda2, args.N, args.M)
+    elif args.model=='RFLAFBS':
+        # Setting parameters
+        print(f'Using model RFLAF_BSpline, modelseed={modelseed}')
+        N, L, R = args.N, args.L, args.R
+        h = (R-L)/(N-1)
+        print(f'BSpline params:\th={h}\tN={N}\tL={L}\tR={R}')
+        model = WRFLAF_BSpline(newfeatures, Qlist, coef, output_dim, N, L, R, modelseed).to(device)
+        regularizer = RidgeRegressionRegularizer(lambda0, newM)
     # elif args.model=='RFMLP':
     #     print(f'Using model RFMLP, modelseed={modelseed}')
     #     model = RFMLP(input_dim, hidden_dim, output_dim, args.actfunc, args.modelseed).to(device)
@@ -355,7 +355,7 @@ if __name__=='__main__':
     lambda0 = 1/np.sqrt(X.shape[0])
     
     print(f'Calculating leverage scores...')
-    LSF = LeverageScore(coef, features, 4/(args.N-1), args.N, seed=args.modelseed)
+    LSF = LeverageScore(coef, features, 4/(args.N-1), args.N, seed=args.modelseed, basis=args.model)
     q_list, effd = LSF(torch.tensor(X, dtype=torch.float64), lambda0)
     print(f'Dataset: {args.data}, effective dimension={effd:.2f}')
     
